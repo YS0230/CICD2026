@@ -46,8 +46,8 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 
 # 安全性最佳實踐：建立非 root 使用者來執行應用程式
 # 若容器被攻破，攻擊者只有有限的系統權限，而非 root 權限
-RUN addgroup --system --gid 1001 appgroup \
- && adduser  --system --uid 1001 --ingroup appgroup appuser
+RUN groupadd --system --gid 1001 appgroup \
+ && useradd  --system --uid 1001 --gid appgroup --no-create-home appuser
 
 WORKDIR /app
 
