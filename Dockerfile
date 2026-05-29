@@ -16,7 +16,7 @@ WORKDIR /src
 
 # 只複製 .csproj 和 .sln 檔案（不複製原始碼）
 # 這樣當只有原始碼變更時，這一層的 cache 仍然有效，可跳過耗時的 restore 步驟
-COPY CicdDemo.sln                                        ./
+COPY CicdDemo.slnx                                       ./
 COPY src/CicdDemo.Api/CicdDemo.Api.csproj                src/CicdDemo.Api/
 COPY tests/CicdDemo.Api.Tests/CicdDemo.Api.Tests.csproj  tests/CicdDemo.Api.Tests/
 
