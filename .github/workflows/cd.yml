@@ -47,8 +47,13 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
-          cache: true
-          cache-dependency-path: "**/packages.lock.json"
+
+      - name: 快取 NuGet 套件
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
 
       - name: 還原 NuGet 套件
         run: dotnet restore CicdDemo.slnx

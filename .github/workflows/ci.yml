@@ -45,10 +45,15 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
-          # 啟用 NuGet 套件快取，避免每次 workflow 都重新下載套件
-          # cache-dependency-path 指向 lock 檔，只有套件版本變更時才更新 cache
-          cache: true
-          cache-dependency-path: "**/packages.lock.json"
+
+      # NuGet 套件快取：以所有 .csproj 的 hash 作為 cache key
+      # 套件版本沒變時直接從 cache 取得，省去重新下載的時間
+      - name: 快取 NuGet 套件
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
 
       # ── 步驟 3：還原 NuGet 套件 ────────────────────────────────────────────
       - name: 還原 NuGet 套件
