@@ -40,10 +40,11 @@ jobs:
         uses: actions/checkout@v4
 
       # ── 步驟 2：安裝 .NET SDK ──────────────────────────────────────────────
-      - name: 安裝 .NET ${{ env.DOTNET_VERSION }} SDK
+      # 注意：with 區塊內不能使用 env 變數（GitHub Actions 平台限制），需直接寫版本號
+      - name: 安裝 .NET 8.0.x SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
+          dotnet-version: "8.0.x"
           # 啟用 NuGet 套件快取，避免每次 workflow 都重新下載套件
           # cache-dependency-path 指向 lock 檔，只有套件版本變更時才更新 cache
           cache: true
