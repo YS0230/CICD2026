@@ -67,7 +67,7 @@ public class TodoItemsControllerIntegrationTests : IClassFixture<TestWebApplicat
         created!.Title.Should().Be("整合測試待辦事項");
         created.IsCompleted.Should().BeFalse();
         // Location Header 應該指向新資源的 URL
-        createResponse.Headers.Location.Should().BeNull();
+        createResponse.Headers.Location.Should().NotBeNull();
 
         // Act 2：用 Id 呼叫 GET 取回剛建立的資料
         var getResponse = await _client.GetAsync($"/api/todoitems/{created.Id}");
