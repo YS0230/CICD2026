@@ -1,0 +1,54 @@
+# docker-compose.yml — 本機開發 / 快速驗證用
+# 使用方式：
+#   docker-compose up -d          啟動（背景執行）
+#   docker-compose logs -f web    查看即時 log
+#   docker-compose down           停止並移除容器（資料 volume 會保留）
+#   docker-compose down -v        停止並移除容器和資料 volume（資料清空）
+
+version: "3.9"
+
+services:
+  # ── Web API 服務 ──────────────────────────────────────────────────────────
+  web:
+    build:
+      context: .            # 使用當前目錄作為建構 context
+      dockerfile: Dockerfile
+
+    # 若已有推送到 Registry 的 image，可改用以下方式（取消下方的 build 並啟用 image）：
+    # image: ${DOCKERHUB_USERNAME}/cicddemo:latest
+
+    container_name: cicddemo_web
+
+    ports:
+      # 將容器的 8080 port 對應到主機的 8080 port
+      # 訪問方式：http://localhost:8080
+      - "8080:8080"
+
+    environment:
+      # 設定為 Docker 環境，讓 Program.cs 的判斷可以開啟 Swagger UI
+      ASPNETCORE_ENVIRONMENT: "Docker"
+      # 覆蓋容器內的預設連線字串，指向 volume 掛載的持久化路徑
+      ConnectionStrings__DefaultConnection: "Data Source=/app/data/todo.db"
+
+    volumes:
+      # 將 todo_data volume 掛載到容器的 /app/data 目錄
+      # 確保 SQLite 資料庫在容器重啟後不會遺失
+      - todo_data:/app/data
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s   # 等待應用程式啟動完成再開始健康檢查
+
+    # 非預期停止時自動重啟（但不在 docker-compose down 時重啟）
+    restart: unless-stopped
+
+# ── Named Volumes（具名資料卷）──────────────────────────────────────────────
+volumes:
+  todo_data:
+    driver: local
+    # 資料儲存在 Docker 管理的目錄下，具體路徑依作業系統而異：
+    # Linux/Mac: /var/lib/docker/volumes/cicd_todo_data/_data
+    # Windows:   \\wsl$\docker-desktop-data\...

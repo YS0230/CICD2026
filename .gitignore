@@ -1,0 +1,37 @@
+## .NET 編譯產出物
+bin/
+obj/
+
+## Visual Studio / Rider 個人設定（不應 commit，每個開發者都有自己的設定）
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+
+## SQLite 資料庫檔案（包含 WAL 模式的附屬檔案，不 commit 以免機密資料洩漏）
+*.db
+*.db-shm
+*.db-wal
+
+## 測試覆蓋率報告（由 CI 產生，不需要 commit）
+coverage/
+*.opencover.xml
+TestResults/
+
+## dotnet publish 的輸出目錄
+publish/
+/app/publish/
+
+## Docker 相關（.dockerignore 單獨管理，不需要加入 git）
+.dockerignore
+
+## 作業系統產生的隱藏檔案
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+## 環境設定檔（含有機密資訊，絕對不能 commit）
+.env
+.env.local
+appsettings.Production.json

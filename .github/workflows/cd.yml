@@ -1,0 +1,146 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# CD Workflow — 持續交付（Continuous Delivery）
+#
+# 觸發時機：只在程式碼 push 到 main 分支時執行
+#
+# 流程設計：
+#   Job 1 (ci)    — 重新執行 Build + Test，確保 CD 前一定通過驗證
+#   Job 2 (docker) — 依賴 ci job 通過後，才執行 Docker 建構和推送
+#
+# 為什麼 CD 裡要重跑 CI，而不直接依賴 ci.yml 的結果？
+#   使用 workflow_run 監聽 ci.yml 有一個問題：在 Fork PR 場景中，
+#   子 workflow 無法取得父 repo 的 Secrets（DOCKERHUB_TOKEN）。
+#   將 CI 步驟直接內嵌為 CD 的第一個 job，可以確保 Secrets 存取無障礙，
+#   且整個流程在同一個 workflow run 中完成，更易於追蹤。
+# ══════════════════════════════════════════════════════════════════════════════
+name: CD
+
+on:
+  push:
+    branches:
+      - main
+
+# 並行控制：確保同一時間只有一個 CD workflow 在執行
+# 若有新的 push 進來，不取消正在執行的 CD（cancel-in-progress: false）
+# 因為 Docker push 取到一半可能造成 registry 中出現損壞的 image
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # 完整的 Docker Hub image 路徑，格式：帳號名稱/image名稱
+  DOCKERHUB_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/cicddemo
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 1：CI 驗證（確保 CD 前程式碼通過 build + test）
+  # ─────────────────────────────────────────────────────────────────────────
+  ci:
+    name: CI 驗證（Build & Test）
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 取出儲存庫程式碼
+        uses: actions/checkout@v4
+
+      - name: 安裝 .NET 8.0.x SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+
+      - name: 還原 NuGet 套件
+        run: dotnet restore CicdDemo.slnx
+
+      - name: 建構 Solution
+        run: dotnet build CicdDemo.slnx --configuration Release --no-restore
+
+      - name: 執行所有測試
+        run: |
+          dotnet test tests/CicdDemo.Api.Tests/CicdDemo.Api.Tests.csproj \
+            --configuration Release \
+            --no-build \
+            --verbosity normal
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Job 2：Docker 建構並推送到 Docker Hub
+  # needs: ci 表示此 Job 必須等待 ci Job 成功後才會執行
+  # ─────────────────────────────────────────────────────────────────────────
+  docker:
+    name: Docker 建構並推送
+    runs-on: ubuntu-latest
+    needs: ci    # 只有 CI 通過才執行 Docker push，防止有問題的 image 進入 Registry
+
+    steps:
+      # ── 步驟 1：取出程式碼 ────────────────────────────────────────────────
+      - name: 取出儲存庫程式碼
+        uses: actions/checkout@v4
+
+      # ── 步驟 2：產生 image tag 元資料 ────────────────────────────────────
+      # docker/metadata-action 根據 git 資訊自動產生合適的 tag：
+      #   - latest：push 到預設分支（main）時貼上
+      #   - sha-xxxxxxx：使用 git commit 短雜湊，方便追蹤哪個 commit 對應哪個 image
+      #   - 1.2.3 / 1.2：當 git tag 是 v1.2.3 時自動產生語義化版本 tag
+      - name: 產生 Docker image 元資料與 Tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKERHUB_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      # ── 步驟 3：安裝 QEMU（支援跨平台模擬）──────────────────────────────
+      # QEMU 允許在 x86_64 的 Runner 上模擬 ARM64 環境，建構跨平台 image
+      - name: 安裝 QEMU（跨平台支援）
+        uses: docker/setup-qemu-action@v3
+
+      # ── 步驟 4：安裝 Docker Buildx ────────────────────────────────────────
+      # Buildx 是 Docker 的多平台建構工具，支援同時建構 amd64 和 arm64 image
+      - name: 安裝 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── 步驟 5：登入 Docker Hub ───────────────────────────────────────────
+      # 使用 GitHub Secrets 存取 Docker Hub 憑證，絕對不要將 token 寫死在程式碼中
+      # 需要在 GitHub Repo Settings > Secrets > Actions 新增：
+      #   DOCKERHUB_USERNAME：Docker Hub 帳號名稱
+      #   DOCKERHUB_TOKEN：Docker Hub 的 Personal Access Token（非密碼）
+      - name: 登入 Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # ── 步驟 6：建構多平台 image 並推送 ──────────────────────────────────
+      # platforms 同時建構 amd64（一般伺服器）和 arm64（Apple Silicon、AWS Graviton）
+      # cache-from/cache-to 使用 GitHub Actions 的 Cache 加速 Docker layer 建構
+      - name: 建構並推送多平台 Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # GHA cache 可以跨 workflow run 共用 Docker build cache
+          # mode=max 快取所有 layer（包含中間 stage），讓後續 build 更快
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── 步驟 7：在 GitHub Actions Summary 顯示推送摘要 ───────────────────
+      # GITHUB_STEP_SUMMARY 是 GitHub 提供的特殊檔案，寫入的 Markdown 會顯示在 workflow 摘要頁
+      - name: 輸出推送摘要
+        run: |
+          echo "## Docker Image 已成功推送" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**推送的 Tags：**" >> $GITHUB_STEP_SUMMARY
+          echo '${{ steps.meta.outputs.tags }}' | tr ',' '\n' | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**使用以下指令拉取 image：**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.DOCKERHUB_IMAGE }}:latest" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

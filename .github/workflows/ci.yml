@@ -1,0 +1,104 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# CI Workflow — 持續整合（Continuous Integration）
+#
+# 觸發時機：
+#   - 有人 push 程式碼到 main 或 develop 分支
+#   - 有人建立/更新對 main 或 develop 的 Pull Request
+#
+# 職責：
+#   快速給開發者回饋，確保每一次程式碼變更都能正確建構且通過所有測試。
+#   若有測試失敗，PR 應該被阻擋不能合入（需在 GitHub Branch Protection Rules 中設定）。
+# ══════════════════════════════════════════════════════════════════════════════
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+# 環境變數：集中管理版本號，方便未來升級只需改一個地方
+env:
+  DOTNET_VERSION: "8.0.x"
+  # .NET 10 SDK 使用新的 .slnx 格式（.sln 已被取代），兩者皆相容 dotnet CLI
+  SOLUTION_PATH: "CicdDemo.slnx"
+  TEST_PROJECT: "tests/CicdDemo.Api.Tests/CicdDemo.Api.Tests.csproj"
+
+jobs:
+  build-and-test:
+    name: Build & Test (.NET ${{ env.DOTNET_VERSION }})
+    # 使用 GitHub 提供的 Ubuntu Runner（比 Windows 便宜且較快）
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 步驟 1：取出程式碼 ──────────────────────────────────────────────────
+      - name: 取出儲存庫程式碼
+        uses: actions/checkout@v4
+
+      # ── 步驟 2：安裝 .NET SDK ──────────────────────────────────────────────
+      - name: 安裝 .NET ${{ env.DOTNET_VERSION }} SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+          # 啟用 NuGet 套件快取，避免每次 workflow 都重新下載套件
+          # cache-dependency-path 指向 lock 檔，只有套件版本變更時才更新 cache
+          cache: true
+          cache-dependency-path: "**/packages.lock.json"
+
+      # ── 步驟 3：還原 NuGet 套件 ────────────────────────────────────────────
+      - name: 還原 NuGet 套件
+        run: dotnet restore ${{ env.SOLUTION_PATH }}
+
+      # ── 步驟 4：建構整個 Solution（Release 模式）──────────────────────────
+      - name: 建構 Solution
+        run: |
+          dotnet build ${{ env.SOLUTION_PATH }} \
+            --configuration Release \
+            --no-restore \
+            --verbosity minimal
+
+      # ── 步驟 5：執行所有測試並收集程式碼覆蓋率 ──────────────────────────
+      - name: 執行測試並收集覆蓋率
+        run: |
+          dotnet test ${{ env.TEST_PROJECT }} \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=test-results.trx" \
+            --results-directory ./TestResults \
+            --collect:"XPlat Code Coverage" \
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+
+      # ── 步驟 6：上傳測試結果 Artifact（即使測試失敗也要上傳，方便查閱）──
+      - name: 上傳測試結果 Artifact
+        uses: actions/upload-artifact@v4
+        # if: always() 確保即使前面的步驟失敗，測試報告仍然會被上傳
+        if: always()
+        with:
+          name: test-results-${{ github.run_id }}
+          path: ./TestResults/**/*.trx
+          # 保留 30 天後自動刪除，節省 GitHub 儲存空間
+          retention-days: 30
+
+      # ── 步驟 7：上傳覆蓋率報告 Artifact ─────────────────────────────────
+      - name: 上傳覆蓋率報告 Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report-${{ github.run_id }}
+          path: ./TestResults/**/coverage.opencover.xml
+          retention-days: 30
+
+      # ── 步驟 8（選用）：上傳覆蓋率到 Codecov ─────────────────────────────
+      # Codecov 可以在 PR 中顯示每次提交的覆蓋率變化
+      # 需要在 GitHub Secrets 設定 CODECOV_TOKEN（public repo 可免 token）
+      # - name: 上傳覆蓋率到 Codecov
+      #   uses: codecov/codecov-action@v4
+      #   with:
+      #     token: ${{ secrets.CODECOV_TOKEN }}
+      #     files: ./TestResults/**/coverage.opencover.xml
+      #     fail_ci_if_error: true
