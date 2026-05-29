@@ -21,7 +21,7 @@ COPY src/CicdDemo.Api/CicdDemo.Api.csproj                src/CicdDemo.Api/
 COPY tests/CicdDemo.Api.Tests/CicdDemo.Api.Tests.csproj  tests/CicdDemo.Api.Tests/
 
 # 還原套件（使用 --locked-mode 確保 CI 環境與本機使用相同的套件版本）
-RUN dotnet restore "CicdDemo.sln" \
+RUN dotnet restore "CicdDemo.slnx" \
     --runtime linux-x64
 
 # ── Stage 2：建構並發布應用程式 ────────────────────────────────────────────────
