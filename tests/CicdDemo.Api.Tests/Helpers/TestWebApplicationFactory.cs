@@ -1,48 +1,64 @@
 using CicdDemo.Api.Data;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace CicdDemo.Api.Tests.Helpers;
 
 /// <summary>
-/// 整合測試用的 WebApplicationFactory，將生產環境的 SQLite 替換為 InMemory 資料庫。
-/// 為什麼要替換：
-///   1. SQLite 需要磁碟 I/O，且在平行測試時會有檔案鎖定問題
-///   2. InMemory DB 速度更快，且每個 Factory 實例可以有獨立的資料庫（避免測試間互相干擾）
-///   3. CI 環境可能沒有寫入磁碟的權限
+/// 整合測試用的 WebApplicationFactory，將生產環境的 SQLite 檔案資料庫
+/// 替換為 SQLite in-memory（Shared Cache 模式）資料庫。
 ///
-/// 繼承 WebApplicationFactory&lt;Program&gt; 可以啟動完整的 HTTP Pipeline，
-/// 讓整合測試能夠測試從 HTTP 請求到資料庫操作的完整流程。
+/// 為什麼不用 EF Core InMemory provider：
+///   EF Core 9 加強了驗證，若 DI 容器同時存在兩個不同的 provider（SQLite + InMemory），
+///   即使已嘗試移除舊的 options，EF Core 仍會拋出「多個 provider」例外。
+///   改用 SQLite in-memory 可以保持單一 provider（SQLite），完全繞開此限制。
+///
+/// Shared Cache 模式說明：
+///   SQLite in-memory 資料庫在「最後一個連線關閉時」即消失。
+///   _keepAlive 連線負責讓資料庫在測試期間持續存在；
+///   EF Core 的每個 DbContext 另外開啟自己的連線，透過 Shared Cache 連到同一個資料庫。
 /// </summary>
 public class TestWebApplicationFactory : WebApplicationFactory<Program>
 {
+    // 唯一的名稱確保每個 Factory 實例有自己的資料庫（避免不同測試類別互相干擾）
+    private readonly string _dbName = $"TestDb_{Guid.NewGuid()}";
+
+    // 保持開啟的「錨點連線」：只要此連線存在，in-memory 資料庫就不會消失
+    private readonly SqliteConnection _keepAlive;
+
+    public TestWebApplicationFactory()
+    {
+        _keepAlive = new SqliteConnection($"Data Source={_dbName};Mode=Memory;Cache=Shared");
+        _keepAlive.Open();
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        // 設定為測試環境，避免觸發生產環境才有的設定
         builder.UseEnvironment("Testing");
 
         builder.ConfigureServices(services =>
         {
-            // 移除原本由 Program.cs 注冊的 DbContext 設定（SQLite 版本）
-            var descriptor = services.SingleOrDefault(
-                d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
-            if (descriptor is not null)
-                services.Remove(descriptor);
+            // 移除原本指向 .db 檔的 SQLite 設定
+            services.RemoveAll<DbContextOptions<AppDbContext>>();
+            services.RemoveAll<AppDbContext>();
 
-            // 先產生資料庫名稱再傳入 lambda，而非在 lambda 內部呼叫 Guid.NewGuid()。
-            // 若在 lambda 內部呼叫，每次 DbContext 被 DI 容器解析時都會產生新 Guid，
-            // 導致每個 HTTP 請求都連到不同的 InMemory 資料庫，資料無法跨請求共用。
-            var dbName = $"TestDb_{Guid.NewGuid()}";
+            // 改用 SQLite in-memory（Shared Cache）
+            // 同樣是 SQLite provider，不會觸發 EF Core 9 的「多個 provider」驗證
+            // Program.cs 的 db.Database.Migrate() 會在啟動時建立 Schema（IsRelational() = true）
             services.AddDbContext<AppDbContext>(options =>
-                options.UseInMemoryDatabase(dbName));
-
-            // 確保 InMemory 資料庫結構已建立（等同於執行 Migration）
-            var sp = services.BuildServiceProvider();
-            using var scope = sp.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            db.Database.EnsureCreated();
+                options.UseSqlite($"Data Source={_dbName};Mode=Memory;Cache=Shared"));
         });
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            _keepAlive.Dispose();   // 關閉錨點連線，in-memory 資料庫隨之釋放
+
+        base.Dispose(disposing);
     }
 }

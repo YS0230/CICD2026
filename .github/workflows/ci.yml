@@ -23,8 +23,7 @@ on:
 
 # 環境變數：集中管理版本號，方便未來升級只需改一個地方
 env:
-  DOTNET_VERSION: "8.0.x"
-  # .NET 10 SDK 使用新的 .slnx 格式（.sln 已被取代），兩者皆相容 dotnet CLI
+  DOTNET_VERSION: "10.0.x"
   SOLUTION_PATH: "CicdDemo.slnx"
   TEST_PROJECT: "tests/CicdDemo.Api.Tests/CicdDemo.Api.Tests.csproj"
 
@@ -41,10 +40,10 @@ jobs:
 
       # ── 步驟 2：安裝 .NET SDK ──────────────────────────────────────────────
       # 注意：with 區塊內不能使用 env 變數（GitHub Actions 平台限制），需直接寫版本號
-      - name: 安裝 .NET 8.0.x SDK
+      - name: 安裝 .NET 10.0.x SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
 
       # NuGet 套件快取：以所有 .csproj 的 hash 作為 cache key
       # 套件版本沒變時直接從 cache 取得，省去重新下載的時間

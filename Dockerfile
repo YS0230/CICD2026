@@ -11,16 +11,15 @@
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── Stage 1：還原 NuGet 套件（利用 layer cache 加速重複 build）────────────────
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS restore
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS restore
 WORKDIR /src
 
-# 只複製 .csproj 和 .sln 檔案（不複製原始碼）
-# 這樣當只有原始碼變更時，這一層的 cache 仍然有效，可跳過耗時的 restore 步驟
+# 只複製 .csproj / .slnx（不複製原始碼）
+# .NET 10 SDK 原生支援 .slnx 格式，可直接 restore 整個 solution
 COPY CicdDemo.slnx                                       ./
 COPY src/CicdDemo.Api/CicdDemo.Api.csproj                src/CicdDemo.Api/
 COPY tests/CicdDemo.Api.Tests/CicdDemo.Api.Tests.csproj  tests/CicdDemo.Api.Tests/
 
-# 還原套件（使用 --locked-mode 確保 CI 環境與本機使用相同的套件版本）
 RUN dotnet restore "CicdDemo.slnx" \
     --runtime linux-x64
 
@@ -43,7 +42,7 @@ RUN dotnet publish "src/CicdDemo.Api/CicdDemo.Api.csproj" \
     --no-restore
 
 # ── Stage 3：最終 runtime image（只含執行所需的最小檔案）──────────────────────
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 
 # 安全性最佳實踐：建立非 root 使用者來執行應用程式
 # 若容器被攻破，攻擊者只有有限的系統權限，而非 root 權限
