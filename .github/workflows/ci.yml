@@ -29,7 +29,7 @@ env:
 
 jobs:
   build-and-test:
-    name: Build & Test (.NET ${{ env.DOTNET_VERSION }})
+    name: Build & Test (.NET 10.0.x)
     # 使用 GitHub 提供的 Ubuntu Runner（比 Windows 便宜且較快）
     runs-on: ubuntu-latest
 
